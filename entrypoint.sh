@@ -1,26 +1,20 @@
 #!/bin/bash
 set -e
 
-# 防止 Git 目录归属权报错
-git config --global --add safe.directory /github/workspace
-
 # === 0. 辅助函数：标准化布尔值 ===
-# 将 True/true/TRUE/1 转为 "true"，其他转为 "false"
 to_bool() {
     local val=$(echo "$1" | tr '[:upper:]' '[:lower:]')
-    if [[ "$val" == "true" || "$val" == "1" ]]; then
-        echo "true"
-    else
-        echo "false"
-    fi
+    if [[ "$val" == "true" || "$val" == "1" ]]; then echo "true"; else echo "false"; fi
 }
 
-# 预处理所有布尔输入
 BOOL_CGO=$(to_bool "${INPUT_CGO}")
 BOOL_UPX=$(to_bool "${INPUT_UPX}")
 BOOL_MD5=$(to_bool "${INPUT_MD5}")
 BOOL_SHA256=$(to_bool "${INPUT_SHA256}")
 BOOL_OVERWRITE=$(to_bool "${INPUT_OVERWRITE}")
+
+# 防止 Git 目录报错
+git config --global --add safe.directory /github/workspace
 
 # === 1. 初始化与版本检测 ===
 PROJECT_DIR="/github/workspace/${INPUT_PROJECT_PATH}"
@@ -29,7 +23,7 @@ if [ ! -d "$PROJECT_DIR" ]; then
     exit 1
 fi
 
-# 提取版本号 (用于文件名)
+# 提取版本号
 VERSION="${INPUT_RELEASE_TAG}"
 if [ -z "$VERSION" ]; then
     if [[ "$GITHUB_REF" == refs/tags/* ]]; then
@@ -47,19 +41,23 @@ cd "$PROJECT_DIR"
 # === 2. 动态安装 Go (如果指定) ===
 if [ -n "${INPUT_GO_VERSION}" ] && [ "${INPUT_GO_VERSION}" != "latest" ]; then
     echo "⬇️  Switching Go version to: ${INPUT_GO_VERSION}..."
-    # 下载 Linux AMD64 版本 (因为容器是 Linux)
     URL="https://go.dev/dl/go${INPUT_GO_VERSION}.linux-amd64.tar.gz"
     curl -L -o go_custom.tar.gz "$URL"
-    
-    # 替换系统 Go
     rm -rf /usr/local/go && tar -C /usr/local -xzf go_custom.tar.gz
     rm go_custom.tar.gz
     export PATH="/usr/local/go/bin:$PATH"
-    
     echo "✅ Go version updated:"
     go version
 else
     echo "ℹ️  Using default Go version."
+fi
+
+# === ✨ 新增：自动处理依赖 ===
+if [ -f "go.mod" ]; then
+    echo "📦 Resolving dependencies (go mod tidy)..."
+    go mod tidy
+else
+    echo "⚠️  No go.mod found, skipping go mod tidy."
 fi
 
 # === 3. 编译环境配置 ===
@@ -74,7 +72,6 @@ if [ "$BOOL_CGO" == "true" ]; then
     export CC="gcc"
     export CXX="g++"
 
-    # 简单的编译器路由逻辑
     if [ "$GOOS" == "windows" ] && [ "$GOARCH" == "amd64" ]; then
         export CC="x86_64-w64-mingw32-gcc"
         export CXX="x86_64-w64-mingw32-g++"
@@ -122,13 +119,11 @@ if [ "$BOOL_UPX" == "true" ]; then
     upx ${INPUT_UPX_ARGS} "${BINARY_NAME}" || echo "⚠️ UPX skipped (error or unsupported arch)."
 fi
 
-# === 6. 打包与命名 (带版本号) ===
-# 命名格式: binaryName-version-os-arch
+# === 6. 打包与命名 ===
 FINAL_NAME="${INPUT_BINARY_NAME}-${VERSION}-${INPUT_GOOS}-${INPUT_GOARCH}"
 PACKED_FILE=""
-
-# 判断打包格式
 COMPRESS_TYPE="${INPUT_COMPRESS_ASSETS}"
+
 if [ "$COMPRESS_TYPE" == "auto" ]; then
     if [ "$GOOS" == "windows" ]; then COMPRESS_TYPE="zip"; else COMPRESS_TYPE="tar.gz"; fi
 fi
@@ -142,7 +137,6 @@ elif [ "$COMPRESS_TYPE" == "tar.gz" ]; then
     echo "🗜️ Tarballing to ${PACKED_FILE}..."
     tar -czvf "${PACKED_FILE}" "${BINARY_NAME}"
 else
-    # 不压缩时，重命名二进制文件以包含版本信息
     PACKED_FILE="${FINAL_NAME}"
     if [ "$GOOS" == "windows" ]; then PACKED_FILE="${PACKED_FILE}.exe"; fi
     mv "${BINARY_NAME}" "${PACKED_FILE}"
@@ -151,12 +145,10 @@ fi
 
 # === 7. 生成 Hash ===
 FILES_TO_UPLOAD="${PACKED_FILE}"
-
 if [ "$BOOL_MD5" == "true" ]; then
     md5sum "${PACKED_FILE}" > "${PACKED_FILE}.md5"
     FILES_TO_UPLOAD="$FILES_TO_UPLOAD ${PACKED_FILE}.md5"
 fi
-
 if [ "$BOOL_SHA256" == "true" ]; then
     sha256sum "${PACKED_FILE}" > "${PACKED_FILE}.sha256"
     FILES_TO_UPLOAD="$FILES_TO_UPLOAD ${PACKED_FILE}.sha256"
@@ -170,13 +162,11 @@ fi
 if [ -n "${INPUT_GITHUB_TOKEN}" ]; then
     echo "🚀 Uploading to Release: $VERSION"
     export GITHUB_TOKEN="${INPUT_GITHUB_TOKEN}"
-    
     if [ -z "$VERSION" ] || [ "$VERSION" == "unknown" ]; then
         echo "⚠️  No tag detected, skipping upload."
     else
         UPLOAD_OPTS=""
         if [ "$BOOL_OVERWRITE" == "true" ]; then UPLOAD_OPTS="--clobber"; fi
-        
         gh release upload "$VERSION" $FILES_TO_UPLOAD $UPLOAD_OPTS || echo "❌ Upload failed."
     fi
 else
