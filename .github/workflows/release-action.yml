@@ -12,13 +12,17 @@ on:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 必须开启写入权限
     steps:
       - uses: actions/checkout@v4
-      
-      # 自动更新 'v1' 标签指向最新的 commit
-      # 这样用户使用 @v1 时永远是最新代码，不需要改版本号
-      - uses: actions/git-tag-action@1.1.2
+        with:
+          fetch-depth: '0' # 必须拉取完整历史才能计算标签
+
+      # 修正点：使用正确的社区 Action
+      - name: Bump version and push tag
+        uses: anothrNick/github-tag-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CUSTOM_TAG: v1
-          FORCE_TAG: true
+          WITH_V: true
+          DEFAULT_BUMP: patch

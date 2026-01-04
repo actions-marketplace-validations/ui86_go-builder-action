@@ -11,7 +11,7 @@ RUN apt-get update && \
     git \
     zip \
     unzip \
-    upx-ucl \
+    upx \
     build-essential \
     mingw-w64 \
     gcc-aarch64-linux-gnu \
