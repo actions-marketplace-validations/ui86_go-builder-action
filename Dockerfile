@@ -1,5 +1,5 @@
 # 使用官方 Go 镜像 (Debian Bookworm)
-FROM golang:1.22-bookworm
+FROM golang:bookworm
 
 # 设置非交互模式
 ENV DEBIAN_FRONTEND=noninteractive
