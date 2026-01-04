@@ -1,0 +1,69 @@
+name: 'Go Build, UPX & Release Action'
+description: 'Build Go binary, compress with UPX, pack assets, and upload to GitHub Release'
+author: 'Your Name'
+branding:
+  icon: 'package'
+  color: 'blue'
+
+inputs:
+  project_path:
+    description: 'Go 项目所在的子目录'
+    default: '.'
+    required: false
+  binary_name:
+    description: '生成的二进制文件名'
+    required: true
+  goos:
+    description: '目标操作系统 (linux, windows, darwin)'
+    default: 'linux'
+    required: true
+  goarch:
+    description: '目标架构 (amd64, arm64, 386)'
+    default: 'amd64'
+    required: true
+  ldflags:
+    description: '编译参数 -ldflags'
+    default: '-s -w'
+    required: false
+  cgo:
+    description: '是否开启 CGO (true/false)'
+    default: 'false'
+    required: false
+  extra_flags:
+    description: '额外的 go build 参数'
+    default: ''
+    required: false
+  enable_upx:
+    description: '是否开启 UPX 压缩'
+    default: 'true'
+    required: false
+  upx_args:
+    description: 'UPX 压缩参数'
+    default: '--best --lzma'
+    required: false
+  compress_assets:
+    description: '是否打包 (auto/zip/tar.gz/false)'
+    default: 'auto'
+    required: false
+  md5:
+    description: '生成 MD5 校验'
+    default: 'true'
+    required: false
+  sha256:
+    description: '生成 SHA256 校验'
+    default: 'true'
+    required: false
+  github_token:
+    description: 'GitHub Token (用于上传 Release)'
+    required: false
+  release_tag:
+    description: '指定上传的 Tag (默认自动获取)'
+    required: false
+  overwrite:
+    description: '是否覆盖 Release 中的同名文件'
+    default: 'true'
+    required: false
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'

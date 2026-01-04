@@ -1,0 +1,56 @@
+name: Test Action
+
+on: [push, pull_request]
+
+jobs:
+  test-build:
+    strategy:
+      matrix:
+        include:
+          # 测试 1: Linux 基础编译
+          - os: linux
+            arch: amd64
+            cgo: 'false'
+            ext: 'tar.gz'
+          # 测试 2: Windows 交叉编译 + CGO + Zip
+          - os: windows
+            arch: amd64
+            cgo: 'true'
+            ext: 'zip'
+
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Test App
+        # 核心：调用当前目录的 Action
+        uses: ./
+        id: build
+        with:
+          project_path: './test'
+          binary_name: 'test-app'
+          goos: ${{ matrix.os }}
+          goarch: ${{ matrix.arch }}
+          cgo: ${{ matrix.cgo }}
+          enable_upx: 'true'
+          compress_assets: 'auto'
+          md5: 'true'
+
+      - name: Verify Artifacts
+        run: |
+          echo "Verifying output..."
+          FILE="test-app-${{ matrix.os }}-${{ matrix.arch }}.${{ matrix.ext }}"
+          if [ -f "$FILE" ]; then
+            echo "✅ $FILE exists."
+            ls -lh $FILE
+          else
+            echo "❌ $FILE not found!"
+            exit 1
+          fi
+          
+          if [ -f "$FILE.md5" ]; then
+            echo "✅ Hash file exists."
+          else
+            echo "❌ Hash file missing!"
+            exit 1
+          fi
