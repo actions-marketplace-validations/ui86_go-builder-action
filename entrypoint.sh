@@ -12,6 +12,7 @@ BOOL_UPX=$(to_bool "${INPUT_UPX}")
 BOOL_MD5=$(to_bool "${INPUT_MD5}")
 BOOL_SHA256=$(to_bool "${INPUT_SHA256}")
 BOOL_OVERWRITE=$(to_bool "${INPUT_OVERWRITE}")
+BOOL_CACHE=$(to_bool "${INPUT_CACHE}")
 
 # 防止 Git 目录报错
 git config --global --add safe.directory /github/workspace
@@ -52,7 +53,19 @@ else
     echo "ℹ️  Using default Go version."
 fi
 
-# === ✨ 新增：自动处理依赖 ===
+# === 3. 缓存配置 (新增核心逻辑) ===
+if [ "$BOOL_CACHE" == "true" ]; then
+    echo "⚡ Cache enabled: Redirecting GOCACHE and GOMODCACHE to workspace..."
+    # 将缓存重定向到 workspace 下的隐藏目录，这样外部 actions/cache 才能访问到
+    export GOCACHE="/github/workspace/.cache/go-build"
+    export GOMODCACHE="/github/workspace/.cache/go-mod"
+    mkdir -p "$GOCACHE"
+    mkdir -p "$GOMODCACHE"
+else
+    echo "ℹ️  Cache disabled."
+fi
+
+# === 4. 处理依赖 ===
 if [ -f "go.mod" ]; then
     echo "📦 Resolving dependencies (go mod tidy)..."
     go mod tidy
@@ -60,7 +73,7 @@ else
     echo "⚠️  No go.mod found, skipping go mod tidy."
 fi
 
-# === 3. 编译环境配置 ===
+# === 5. 编译环境配置 ===
 export GOOS="${INPUT_GOOS}"
 export GOARCH="${INPUT_GOARCH}"
 export CGO_ENABLED=0
@@ -100,7 +113,7 @@ if [ "$GOOS" == "windows" ]; then
     BINARY_NAME="${BINARY_NAME}.exe"
 fi
 
-# === 4. 执行构建 ===
+# === 6. 执行构建 ===
 echo "🔨 Building ${BINARY_NAME}..."
 go build -v -a \
   -ldflags "${INPUT_LDFLAGS}" \
@@ -113,13 +126,13 @@ if [ ! -f "${BINARY_NAME}" ]; then
     exit 1
 fi
 
-# === 5. UPX 压缩 ===
+# === 7. UPX 压缩 ===
 if [ "$BOOL_UPX" == "true" ]; then
     echo "📦 Compressing with UPX..."
     upx ${INPUT_UPX_ARGS} "${BINARY_NAME}" || echo "⚠️ UPX skipped (error or unsupported arch)."
 fi
 
-# === 6. 打包与命名 ===
+# === 8. 打包与命名 ===
 FINAL_NAME="${INPUT_BINARY_NAME}-${VERSION}-${INPUT_GOOS}-${INPUT_GOARCH}"
 PACKED_FILE=""
 COMPRESS_TYPE="${INPUT_COMPRESS_ASSETS}"
@@ -143,7 +156,7 @@ else
     echo "⏩ Renamed binary to ${PACKED_FILE}"
 fi
 
-# === 7. 生成 Hash ===
+# === 9. 生成 Hash ===
 FILES_TO_UPLOAD="${PACKED_FILE}"
 if [ "$BOOL_MD5" == "true" ]; then
     md5sum "${PACKED_FILE}" > "${PACKED_FILE}.md5"
@@ -158,7 +171,7 @@ if [ "$PROJECT_DIR" != "/github/workspace" ]; then
     cp $FILES_TO_UPLOAD /github/workspace/
 fi
 
-# === 8. Release 上传 ===
+# === 10. Release 上传 ===
 if [ -n "${INPUT_GITHUB_TOKEN}" ]; then
     echo "🚀 Uploading to Release: $VERSION"
     export GITHUB_TOKEN="${INPUT_GITHUB_TOKEN}"

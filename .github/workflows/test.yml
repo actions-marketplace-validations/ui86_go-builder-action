@@ -22,6 +22,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Go Cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            .cache/go-build
+            .cache/go-mod
+          # 使用 go.sum 计算 hash，确保依赖变动时刷新缓存
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
       - name: Build Test App
         # 引用当前目录的 Action
         uses: ./
@@ -35,6 +46,7 @@ jobs:
           cgo: ${{ matrix.cgo }}
           upx: true
           compress_assets: 'auto'
+          cache: true
           md5: true
 
       - name: Verify Artifacts

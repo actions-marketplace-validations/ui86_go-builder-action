@@ -14,7 +14,7 @@ inputs:
     description: '生成的二进制文件名'
     required: true
   go_version:
-    description: '指定 Go 版本 (例如 1.21.5, 默认为镜像内置的最新版)'
+    description: '指定 Go 版本 (例如 1.21.5, 默认为镜像内置最新版)'
     default: ''
     required: false
   goos:
@@ -66,6 +66,10 @@ inputs:
   overwrite:
     description: '是否覆盖 Release 中的同名文件'
     default: 'true'
+    required: false
+  cache:
+    description: '是否启用缓存 (将缓存路径重定向到 workspace 以便保存)'
+    default: 'false'
     required: false
 
 runs:
