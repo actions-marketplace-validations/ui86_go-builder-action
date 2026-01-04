@@ -71,7 +71,6 @@ inputs:
     description: '是否启用缓存 (将缓存路径重定向到 workspace 以便保存)'
     default: 'false'
     required: false
-
 runs:
   using: 'docker'
   image: 'Dockerfile'

@@ -17,12 +17,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: '0' # 必须拉取完整历史才能计算标签
+          fetch-depth: '0' # 必须拉取完整历史
 
-      # 修正点：使用正确的社区 Action
+      # 1. 生成具体的版本号 (例如 v1.0.5)
       - name: Bump version and push tag
-        uses: anothrNick/github-tag-action@v1
+        id: tag_version
+        uses: anothrNick/github-tag-action@1.67.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WITH_V: true
           DEFAULT_BUMP: patch
+
+      # 2. 【关键新增】强制更新 v1 标签
+      - name: Update Major Tag (v1)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 强制创建/更新本地 v1 标签
+          git tag -fa v1 -m "Update v1 major tag"
+          
+          # 强制推送到远程
+          git push origin v1 --force
