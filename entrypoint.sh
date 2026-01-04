@@ -4,63 +4,107 @@ set -e
 # 防止 Git 目录归属权报错
 git config --global --add safe.directory /github/workspace
 
-# === 1. 初始化路径 ===
+# === 0. 辅助函数：标准化布尔值 ===
+# 将 True/true/TRUE/1 转为 "true"，其他转为 "false"
+to_bool() {
+    local val=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+    if [[ "$val" == "true" || "$val" == "1" ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+# 预处理所有布尔输入
+BOOL_CGO=$(to_bool "${INPUT_CGO}")
+BOOL_UPX=$(to_bool "${INPUT_UPX}")
+BOOL_MD5=$(to_bool "${INPUT_MD5}")
+BOOL_SHA256=$(to_bool "${INPUT_SHA256}")
+BOOL_OVERWRITE=$(to_bool "${INPUT_OVERWRITE}")
+
+# === 1. 初始化与版本检测 ===
 PROJECT_DIR="/github/workspace/${INPUT_PROJECT_PATH}"
 if [ ! -d "$PROJECT_DIR" ]; then
     echo "Error: Project directory '$PROJECT_DIR' does not exist."
     exit 1
 fi
+
+# 提取版本号 (用于文件名)
+VERSION="${INPUT_RELEASE_TAG}"
+if [ -z "$VERSION" ]; then
+    if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+        VERSION="${GITHUB_REF#refs/tags/}"
+    elif [[ "$GITHUB_REF" == refs/heads/* ]]; then
+        VERSION="${GITHUB_REF#refs/heads/}"
+    else
+        VERSION="unknown"
+    fi
+fi
+echo "ℹ️  Version detected: $VERSION"
+
 cd "$PROJECT_DIR"
 
-# === 2. 配置环境 ===
+# === 2. 动态安装 Go (如果指定) ===
+if [ -n "${INPUT_GO_VERSION}" ] && [ "${INPUT_GO_VERSION}" != "latest" ]; then
+    echo "⬇️  Switching Go version to: ${INPUT_GO_VERSION}..."
+    # 下载 Linux AMD64 版本 (因为容器是 Linux)
+    URL="https://go.dev/dl/go${INPUT_GO_VERSION}.linux-amd64.tar.gz"
+    curl -L -o go_custom.tar.gz "$URL"
+    
+    # 替换系统 Go
+    rm -rf /usr/local/go && tar -C /usr/local -xzf go_custom.tar.gz
+    rm go_custom.tar.gz
+    export PATH="/usr/local/go/bin:$PATH"
+    
+    echo "✅ Go version updated:"
+    go version
+else
+    echo "ℹ️  Using default Go version."
+fi
+
+# === 3. 编译环境配置 ===
 export GOOS="${INPUT_GOOS}"
 export GOARCH="${INPUT_GOARCH}"
+export CGO_ENABLED=0
 
-# 动态配置 CGO 和 编译器
-if [ "${INPUT_CGO}" == "true" ]; then
+if [ "$BOOL_CGO" == "true" ]; then
     export CGO_ENABLED=1
     echo "🔧 CGO Enabled. Configuring cross-compiler..."
     
     export CC="gcc"
     export CXX="g++"
 
-    # Windows 64-bit
+    # 简单的编译器路由逻辑
     if [ "$GOOS" == "windows" ] && [ "$GOARCH" == "amd64" ]; then
         export CC="x86_64-w64-mingw32-gcc"
         export CXX="x86_64-w64-mingw32-g++"
-    # Windows 32-bit
     elif [ "$GOOS" == "windows" ] && [ "$GOARCH" == "386" ]; then
         export CC="i686-w64-mingw32-gcc"
         export CXX="i686-w64-mingw32-g++"
-    # Linux ARM64
     elif [ "$GOOS" == "linux" ] && [ "$GOARCH" == "arm64" ]; then
         export CC="aarch64-linux-gnu-gcc"
         export CXX="aarch64-linux-gnu-g++"
-    # Linux ARM
     elif [ "$GOOS" == "linux" ] && [ "$GOARCH" == "arm" ]; then
         export CC="arm-linux-gnueabi-gcc"
         export CXX="arm-linux-gnueabi-g++"
     fi
     
-    echo "   -> Compiler set to: $CC"
+    echo "   -> Compiler: $CC"
     
-    # CGO Linux 静态链接修复
     if [ "$GOOS" == "linux" ]; then
         INPUT_LDFLAGS="${INPUT_LDFLAGS} -extldflags \"-static\""
     fi
 else
-    export CGO_ENABLED=0
     echo "🛡️ CGO Disabled."
 fi
 
-# 处理 Windows 后缀
 BINARY_NAME="${INPUT_BINARY_NAME}"
 if [ "$GOOS" == "windows" ]; then
     BINARY_NAME="${BINARY_NAME}.exe"
 fi
 
-# === 3. 执行编译 ===
-echo "🔨 Building ${BINARY_NAME} for ${GOOS}/${GOARCH}..."
+# === 4. 执行构建 ===
+echo "🔨 Building ${BINARY_NAME}..."
 go build -v -a \
   -ldflags "${INPUT_LDFLAGS}" \
   ${INPUT_EXTRA_FLAGS} \
@@ -68,78 +112,73 @@ go build -v -a \
   .
 
 if [ ! -f "${BINARY_NAME}" ]; then
-    echo "❌ Build failed: ${BINARY_NAME} not created."
+    echo "❌ Build failed!"
     exit 1
 fi
 
-# === 4. UPX 压缩 ===
-if [ "${INPUT_ENABLE_UPX}" == "true" ]; then
+# === 5. UPX 压缩 ===
+if [ "$BOOL_UPX" == "true" ]; then
     echo "📦 Compressing with UPX..."
-    upx ${INPUT_UPX_ARGS} "${BINARY_NAME}" || echo "⚠️ UPX failed or skipped (arch unsupported?), continuing..."
+    upx ${INPUT_UPX_ARGS} "${BINARY_NAME}" || echo "⚠️ UPX skipped (error or unsupported arch)."
 fi
 
-# === 5. 资产打包 ===
-ASSET_NAME="${INPUT_BINARY_NAME}-${INPUT_GOOS}-${INPUT_GOARCH}"
+# === 6. 打包与命名 (带版本号) ===
+# 命名格式: binaryName-version-os-arch
+FINAL_NAME="${INPUT_BINARY_NAME}-${VERSION}-${INPUT_GOOS}-${INPUT_GOARCH}"
 PACKED_FILE=""
-COMPRESS_TYPE="${INPUT_COMPRESS_ASSETS}"
 
+# 判断打包格式
+COMPRESS_TYPE="${INPUT_COMPRESS_ASSETS}"
 if [ "$COMPRESS_TYPE" == "auto" ]; then
     if [ "$GOOS" == "windows" ]; then COMPRESS_TYPE="zip"; else COMPRESS_TYPE="tar.gz"; fi
 fi
 
 if [ "$COMPRESS_TYPE" == "zip" ]; then
-    PACKED_FILE="${ASSET_NAME}.zip"
+    PACKED_FILE="${FINAL_NAME}.zip"
     echo "🗜️ Zipping to ${PACKED_FILE}..."
     zip -r "${PACKED_FILE}" "${BINARY_NAME}"
 elif [ "$COMPRESS_TYPE" == "tar.gz" ]; then
-    PACKED_FILE="${ASSET_NAME}.tar.gz"
+    PACKED_FILE="${FINAL_NAME}.tar.gz"
     echo "🗜️ Tarballing to ${PACKED_FILE}..."
     tar -czvf "${PACKED_FILE}" "${BINARY_NAME}"
 else
-    PACKED_FILE="${BINARY_NAME}" # 不压缩
-    echo "⏩ Skipping archive."
+    # 不压缩时，重命名二进制文件以包含版本信息
+    PACKED_FILE="${FINAL_NAME}"
+    if [ "$GOOS" == "windows" ]; then PACKED_FILE="${PACKED_FILE}.exe"; fi
+    mv "${BINARY_NAME}" "${PACKED_FILE}"
+    echo "⏩ Renamed binary to ${PACKED_FILE}"
 fi
 
-# === 6. 生成 Hash ===
+# === 7. 生成 Hash ===
 FILES_TO_UPLOAD="${PACKED_FILE}"
 
-if [ "${INPUT_MD5}" == "true" ]; then
+if [ "$BOOL_MD5" == "true" ]; then
     md5sum "${PACKED_FILE}" > "${PACKED_FILE}.md5"
     FILES_TO_UPLOAD="$FILES_TO_UPLOAD ${PACKED_FILE}.md5"
 fi
 
-if [ "${INPUT_SHA256}" == "true" ]; then
+if [ "$BOOL_SHA256" == "true" ]; then
     sha256sum "${PACKED_FILE}" > "${PACKED_FILE}.sha256"
     FILES_TO_UPLOAD="$FILES_TO_UPLOAD ${PACKED_FILE}.sha256"
 fi
 
-# 移动到根目录方便 Debug（如果是在子目录编译）
 if [ "$PROJECT_DIR" != "/github/workspace" ]; then
     cp $FILES_TO_UPLOAD /github/workspace/
 fi
 
-# === 7. 上传到 Release ===
+# === 8. Release 上传 ===
 if [ -n "${INPUT_GITHUB_TOKEN}" ]; then
-    echo "🚀 Uploading to GitHub Release..."
+    echo "🚀 Uploading to Release: $VERSION"
     export GITHUB_TOKEN="${INPUT_GITHUB_TOKEN}"
     
-    TAG_NAME="${INPUT_RELEASE_TAG}"
-    # 如果没指定 Tag，尝试从 Ref 获取
-    if [ -z "$TAG_NAME" ]; then
-        if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TAG_NAME="${GITHUB_REF#refs/tags/}"
-        fi
-    fi
-
-    if [ -z "$TAG_NAME" ]; then
-        echo "⚠️ No tag found. Skipping upload."
+    if [ -z "$VERSION" ] || [ "$VERSION" == "unknown" ]; then
+        echo "⚠️  No tag detected, skipping upload."
     else
         UPLOAD_OPTS=""
-        if [ "${INPUT_OVERWRITE}" == "true" ]; then UPLOAD_OPTS="--clobber"; fi
+        if [ "$BOOL_OVERWRITE" == "true" ]; then UPLOAD_OPTS="--clobber"; fi
         
-        # 真正执行上传
-        gh release upload "$TAG_NAME" $FILES_TO_UPLOAD $UPLOAD_OPTS || echo "❌ Upload failed (Does release exist?)."
+        gh release upload "$VERSION" $FILES_TO_UPLOAD $UPLOAD_OPTS || echo "❌ Upload failed."
     fi
 else
-    echo "ℹ️ GITHUB_TOKEN not provided. Skipping upload."
+    echo "ℹ️  No token provided, skipping upload."
 fi

@@ -23,31 +23,36 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build Test App
-        # 核心：调用当前目录的 Action
+        # 引用当前目录的 Action
         uses: ./
         id: build
         with:
           project_path: './test'
           binary_name: 'test-app'
+          release_tag: 'v0.0.1'
           goos: ${{ matrix.os }}
           goarch: ${{ matrix.arch }}
           cgo: ${{ matrix.cgo }}
-          enable_upx: 'true'
+          upx: true
           compress_assets: 'auto'
-          md5: 'true'
+          md5: true
 
       - name: Verify Artifacts
         run: |
           echo "Verifying output..."
-          FILE="test-app-${{ matrix.os }}-${{ matrix.arch }}.${{ matrix.ext }}"
+          
+          FILE="test-app-v0.0.1-${{ matrix.os }}-${{ matrix.arch }}.${{ matrix.ext }}"
+          
           if [ -f "$FILE" ]; then
             echo "✅ $FILE exists."
-            ls -lh $FILE
+            ls -lh "$FILE"
           else
-            echo "❌ $FILE not found!"
+            echo "❌ $FILE not found! (Check naming logic in entrypoint.sh)"
+            ls -R # 列出所有文件帮忙排错
             exit 1
           fi
           
+          # 检查 Hash 文件
           if [ -f "$FILE.md5" ]; then
             echo "✅ Hash file exists."
           else

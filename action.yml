@@ -13,6 +13,10 @@ inputs:
   binary_name:
     description: '生成的二进制文件名'
     required: true
+  go_version:
+    description: '指定 Go 版本 (例如 1.21.5, 默认为镜像内置的最新版)'
+    default: ''
+    required: false
   goos:
     description: '目标操作系统 (linux, windows, darwin)'
     default: 'linux'
@@ -33,8 +37,8 @@ inputs:
     description: '额外的 go build 参数'
     default: ''
     required: false
-  enable_upx:
-    description: '是否开启 UPX 压缩'
+  upx:
+    description: '是否开启 UPX 压缩 (true/false)'
     default: 'true'
     required: false
   upx_args:
